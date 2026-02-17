@@ -1,0 +1,34 @@
+{
+  "name": "ristretto",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ainmon/ristretto.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ainmon/ristretto/issues"
+  },
+  "homepage": "https://github.com/ainmon/ristretto#readme",
+  "description": "",
+  "dependencies": {
+    "@clack/prompts": "^1.0.1",
+    "cac": "^6.7.14",
+    "estree-walker": "^3.0.3",
+    "fast-glob": "^3.3.3",
+    "magic-string": "^0.30.21",
+    "picocolors": "^1.1.1",
+    "svelte": "^5.51.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
