@@ -1,0 +1,35 @@
+name: Test Ristretto ☕
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    name: 🧪 Taste Test (Build & Test)
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Check out the code
+      - uses: actions/checkout@v4
+
+      # 2. Install Node.js
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # 3. Install dependencies (Clean install)
+      - name: 📦 Install Deps
+        run: npm ci
+
+      # 4. Check for Typescript errors
+      - name: ⚙️ Build (Type Check)
+        run: npm run build
+
+      # 5. Run the actual tests
+      - name: ☕ Run Tests
+        run: npm test
