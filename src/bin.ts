@@ -2,8 +2,8 @@
 // #!/usr/bin/env node
 import { intro, outro, spinner, note } from '@clack/prompts';
 import color from 'picocolors';
-import { findSvelteFiles } from './scanner';
-import { analyzeFile } from './analyzer';
+import { findSvelteFiles } from './scanner.js';
+import { analyzeFile } from './analyzer.js';
 
 async function main() {
   console.clear();
