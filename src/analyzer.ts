@@ -1,98 +1,80 @@
 // src/analyzer.ts
 import { readFile } from 'fs/promises';
 import { parse } from 'svelte/compiler';
-// @ts-ignore - estree-walker types are indeed annoying
+// @ts-ignore - estree-walker types
 import { walk } from 'estree-walker';
+import { noConsoleLog, noWildSubscriptions, Context, Roast } from './rules/index.js';
 
-export interface RoastResult {
+export interface RoastResult extends Roast {
   file: string;
-  line: number;
-  message: string;
-  type: 'burnt-note' | 'weak-foam';
 }
 
 export async function analyzeFile(filePath: string): Promise<RoastResult[]> {
   const code = await readFile(filePath, 'utf-8');
   const results: RoastResult[] = [];
 
-  // 1. TRACKERS
-  // Stores variables that hold a subscription: "unsubscribe" -> line 10
-  const assignedSubscriptions = new Map<string, number>(); 
-  // Stores variables that were actually called: "unsubscribe"
-  const calledFunctions = new Set<string>();
+  // Initialize our state trackers
+  const context: Context = {
+    assignedSubscriptions: new Map(),
+    calledFunctions: new Set()
+  };
 
   try {
     const ast = parse(code, { filename: filePath, modern: true });
 
     if (ast.instance && ast.instance.content) {
       walk(ast.instance.content, {
-        // @ts-ignore - parent is the second argument
+        // @ts-ignore - parent is the second arg in estree-walker
         enter(node: any, parent: any) {
           
-          if (node.type === 'CallExpression') {
+          // --- 1. RUN INSTANT RULES ---
+          // These rules don't need history, they just check the current node.
+            const rules = [noConsoleLog, noWildSubscriptions];
+          
+          for (const rule of rules) {
+            const result = rule(node, parent, context);
+            if (result) {
+              results.push({ file: filePath, ...result });
+            }
+          }
 
-            // --- CHECK A: Console Logs ---
-            if (
-              node.callee.type === 'MemberExpression' &&
-              node.callee.object.name === 'console' &&
-              node.callee.property.name === 'log'
-            ) {
-              results.push({
-                file: filePath,
-                line: node.loc?.start.line || 0,
-                message: 'Console.log detected. Did you leave a debug statement?',
-                type: 'burnt-note'
-              });
+          // --- 2. UPDATE STATE (Track Variables) ---
+          
+          // A. Track Assignments: const x = store.subscribe()
+          if (
+            node.type === 'CallExpression' &&
+            node.callee.type === 'MemberExpression' &&
+            node.callee.property?.name === 'subscribe'
+          ) {
+            if (parent?.type === 'VariableDeclarator') {
+              context.assignedSubscriptions.set(parent.id.name, node.loc?.start.line || 0);
+            } else if (parent?.type === 'AssignmentExpression') {
+              context.assignedSubscriptions.set(parent.left.name, node.loc?.start.line || 0);
             }
+          }
 
-            // --- CHECK B: Subscription Handling ---
-            // Detect: something.subscribe(...)
-            if (
-              node.callee.type === 'MemberExpression' &&
-              node.callee.property?.name === 'subscribe'
-            ) {
-              // CASE 1: Assigned to a variable? (const x = store.subscribe)
-              if (parent?.type === 'VariableDeclarator') {
-                const varName = parent.id.name;
-                assignedSubscriptions.set(varName, node.loc?.start.line || 0);
-              } 
-              // CASE 2: Assigned to an existing var? (x = store.subscribe)
-              else if (parent?.type === 'AssignmentExpression') {
-                const varName = parent.left.name;
-                assignedSubscriptions.set(varName, node.loc?.start.line || 0);
-              }
-              // CASE 3: Not assigned at all? (store.subscribe) -> IMMEDIATE ERROR
-              else {
-                results.push({
-                  file: filePath,
-                  line: node.loc?.start.line || 0,
-                  message: 'Unassigned subscription detected. You must assign this to a variable to unsubscribe later.',
-                  type: 'burnt-note'
-                });
-              }
-            }
+          // B. Track Calls: unsubscribe()
+          if (node.type === 'CallExpression' && node.callee.type === 'Identifier') {
+            context.calledFunctions.add(node.callee.name);
+          }
 
-            // --- CHECK C: Track Function Calls ---
-            // If we see "unsubscribe()", remember that "unsubscribe" was called.
-            if (node.callee.type === 'Identifier') {
-               calledFunctions.add(node.callee.name);
-            }
-            
-            // Edge Case: onDestroy(unsubscribe) - passing it as an argument also counts!
-            if (node.callee.name === 'onDestroy' && node.arguments.length > 0) {
-                 const arg = node.arguments[0];
-                 if (arg.type === 'Identifier') {
-                     calledFunctions.add(arg.name);
-                 }
-            }
+          // C. Track Helpers: onDestroy(unsubscribe)
+          if (
+            node.type === 'CallExpression' &&
+            node.callee.name === 'onDestroy' &&
+            node.arguments.length > 0
+          ) {
+             const arg = node.arguments[0];
+             if (arg.type === 'Identifier') {
+                 context.calledFunctions.add(arg.name);
+             }
           }
         },
       });
 
-      // --- 2. POST-DIAGNOSIS (Compare the lists) ---
-      for (const [varName, line] of assignedSubscriptions) {
-        // If we found 'const unsub = ...' but never saw 'unsub()' or 'onDestroy(unsub)'
-        if (!calledFunctions.has(varName)) {
+      // --- 3. POST-SCAN CHECKS (Memory Leaks) ---
+      for (const [varName, line] of context.assignedSubscriptions) {
+        if (!context.calledFunctions.has(varName)) {
            results.push({
              file: filePath,
              line: line,
@@ -103,7 +85,8 @@ export async function analyzeFile(filePath: string): Promise<RoastResult[]> {
       }
     }
   } catch (e) {
-    // Parser errors are ignored for now
+    // If parsing fails, we ignore it for now (or you could return a special error roast)
+    // console.error(`Failed to parse ${filePath}`, e);
   }
 
   return results;
