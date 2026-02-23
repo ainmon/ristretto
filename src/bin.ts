@@ -1,64 +1,85 @@
 // src/bin.ts
-// #!/usr/bin/env node
-import { intro, outro, spinner, note } from '@clack/prompts';
+import { intro, outro, spinner, log } from '@clack/prompts';
 import color from 'picocolors';
 import { findSvelteFiles } from './scanner.js';
 import { analyzeFile } from './analyzer.js';
+import type { RoastResult } from './analyzer.js';
 
 async function main() {
   console.clear();
-  
-  // #3e2723 change to this
-  intro((color.bgBlack(color.white(' ☕ RISTRETTO '))));
 
-  
+  intro(color.bgBlack(color.white(' ☕ RISTRETTO ')));
 
-  // GET THE ARGUMENT (folder name)
-  // If you type "npx ts-node src/bin.ts sandbox", this captures "sandbox"
-  // TODO: Add a check to see if the directory exists and if not, throw an error
-  // TODO: Add a check to see if the directory is a valid Svelte project and if not, throw an error
-  const targetDir = process.argv[2] || '.'; 
+  // Accept a target directory as the first arg, default to cwd
+  const targetDir = process.argv[2] || '.';
 
   const s = spinner();
-  
-  // PASS IT TO THE SCANNER
-  s.start(`Grinding beans in ${targetDir}...`);
+
+  s.start(`Grinding beans in ${color.cyan(targetDir)} ...`);
   const files = await findSvelteFiles(targetDir);
-  s.stop(`Found ${files.length} files.`);
+  s.stop(`Found ${color.bold(String(files.length))} Svelte file${files.length !== 1 ? 's' : ''}.`);
 
   if (files.length === 0) {
     outro('No Svelte files found. Is this the right directory?');
     return;
   }
 
-  // 2. Analyze
-  s.start('Pulling the shot (analyzing)...');
-  
-  const allIssues = [];
-  
+  s.start('Pulling the shot (analyzing) ...');
+  const allIssues: RoastResult[] = [];
   for (const file of files) {
     const issues = await analyzeFile(file);
     allIssues.push(...issues);
   }
-  
   s.stop('Extraction complete.');
 
-  // 3. Report
-  if (allIssues.length > 0) {
-    // Group issues by file for cleaner output
-    for (const issue of allIssues) {
-      const relativeFile = issue.file.replace(process.cwd(), '.');
+  if (allIssues.length === 0) {
+    outro(color.green('✨ Perfect shot! No issues found.'));
+    return;
+  }
+
+  // ── Group by file for a cleaner report ──────────────────────────────────
+  const byFile = new Map<string, RoastResult[]>();
+  for (const issue of allIssues) {
+    if (!byFile.has(issue.file)) byFile.set(issue.file, []);
+    byFile.get(issue.file)!.push(issue);
+  }
+
+  console.log(''); // breathing room after spinner
+
+  for (const [file, issues] of byFile) {
+    const relFile = file.replace(process.cwd(), '.').replace(/\\/g, '/');
+    console.log(`  ${color.bold(color.underline(relFile))}`);
+
+    // Sort: errors first, then warnings; then by line number
+    const sorted = [...issues].sort((a, b) => {
+      if (a.severity !== b.severity) return a.severity === 'error' ? -1 : 1;
+      return a.line - b.line;
+    });
+
+    for (const issue of sorted) {
+      const icon =
+        issue.severity === 'error' ? color.red('✖') : color.yellow('⚠');
+      const lineTag = color.dim(`line ${issue.line}`);
+      const ruleTag = color.dim(`[${issue.ruleId}]`);
       console.log(
-        `  ${color.red('●')} ${color.bold(relativeFile)}:${issue.line} \n` +
-        `    ${color.dim('└─')} ${issue.message}\n`
+        `    ${icon} ${lineTag} ${ruleTag}\n` +
+        `       ${color.dim('└─')} ${issue.message}\n`,
       );
     }
-    
-    outro(color.yellow(`Order up! Found ${allIssues.length} burnt notes.`));
-    process.exit(1);
-  } else {
-    outro(color.green('✨ Perfect Shot! No issues found.'));
   }
+
+  // ── Summary line ─────────────────────────────────────────────────────────
+  const errorCount = allIssues.filter((i) => i.severity === 'error').length;
+  const warnCount = allIssues.filter((i) => i.severity === 'warning').length;
+
+  const parts: string[] = [];
+  if (errorCount > 0)
+    parts.push(color.red(`${errorCount} error${errorCount !== 1 ? 's' : ''}`));
+  if (warnCount > 0)
+    parts.push(color.yellow(`${warnCount} warning${warnCount !== 1 ? 's' : ''}`));
+
+  outro(color.yellow(`Order up! Found ${parts.join(color.dim(', '))}.`));
+  process.exit(1);
 }
 
 main().catch(console.error);
